@@ -46,11 +46,10 @@ from numba import njit
 def linterpND(p, origin, ih, *data):
     """Linearly interpolate multidimensional arrays at a given point.
 
-    The interpolation is linear on each dimension of the data. Note that this
-    function does not interpolate on a grid of points, but at a single one.
+    The interpolation is linear on each dimension of the data.
 
     Arguments:
-    p      -- array of floats, shape=(n,): interpolation point
+    p      -- array of floats, shape=(n, m): interpolation points
     origin -- array of floats, shape=(n,): first point of the grid for each
               dimension
     ih     -- array of floats, shape=(n,): inverse of the grid spacing on each
@@ -59,7 +58,7 @@ def linterpND(p, origin, ih, *data):
               interpolate
 
     Returns:
-    result -- array of floats, shape=(len(data),): the result of the
+    result -- array of floats, shape=(len(data), m): the result of the
               interpolation for each data array
 
     Notes:
@@ -81,60 +80,61 @@ def linterpND(p, origin, ih, *data):
     """
 
     ndata = len(data)
-
+    npoints = len(p[0])
     shape = np.array(data[0].shape, dtype=np.int64)
     d = len(shape)
+    result = np.zeros((ndata, npoints), dtype=data[0].dtype)
 
-    aux = (p - origin)*ih
+    for k in range(npoints):
+        pk = p[:, k]
+        aux = (pk - origin)*ih
 
-    ind = aux.astype(np.int64)
-    for i in range(d):
-        if (ind[i] == shape[i] - 1):
-            ind[i] -= 1
+        ind = aux.astype(np.int64)
+        for i in range(d):
+            if ind[i] == shape[i] - 1:
+                ind[i] -= 1
 
-    coeff = np.empty(d)
-    coeff = 1 - aux + ind
+        coeff = np.empty(d)
+        coeff = 1 - aux + ind
 
-    aux = shape
-    aux[0] = 1
-    aux = np.cumprod(np.roll(aux, -1)[::-1])[::-1]
+        aux2 = shape
+        aux2[0] = 1
+        aux2 = np.cumprod(np.roll(aux2, -1)[::-1])[::-1]
 
-    a = np.array((0, 1), dtype=np.int64)
-    vertices = np.empty((2**d, d), dtype=np.int64)
+        a = np.array((0, 1), dtype=np.int64)
+        vertices = np.empty((2**d, d), dtype=np.int64)
 
-    vertices[:, 0] = np.repeat(a, 2**(d - 1))
-    for i in range(1, d):
-        for j in range(2**i):
-            s = d - i
-            vertices[j*2**s:(j + 1)*2**s, i] = np.repeat(a, 2**(s - 1))
+        vertices[:, 0] = np.repeat(a, 2**(d - 1))
+        for i in range(1, d):
+            for j in range(2**i):
+                s = d - i
+                vertices[j*2**s:(j + 1)*2**s, i] = np.repeat(a, 2**(s - 1))
 
-    result = np.zeros(ndata, dtype=data[0].dtype)
+        for n in range(2**d):
 
-    for n in range(2**d):
+            vertex = vertices[n]
+            i = np.sum((ind + vertex)*aux2)
+            c = np.prod(np.abs(vertex - coeff))
 
-        vertex = vertices[n]
-        i = np.sum((ind + vertex)*aux)
-        c = np.prod(np.abs(vertex - coeff))
-
-        for j in range(ndata):
-            result[j] += data[j].flat[i]*c
+            for j in range(ndata):
+                result[j, k] += data[j].flat[i]*c
 
     return result
 
 
 @njit(cache=True, fastmath=True)
 def linterp1D(px, origin, ih, *data):
-    """Linearly interpolate one-dimensional arrays at a given points.
+    """Linearly interpolate one-dimensional arrays at a given point.
 
     Arguments:
-    px     -- array of floats: interpolation points
+    pxs    -- array of floats, shape=(n,): interpolation points
     origin -- float: first point of the grid
     ih     -- float: inverse of the grid spacing
     data   -- arrays of floats, each of shape=(s,): the data to interpolate
 
     Returns:
-    result -- array of floats, shape=(len(data), len(px)): the result of
-              the interpolation for each data array and each point
+    result -- array of floats, shape=(len(data), n): the result of the
+              interpolation for each data array and each interpolation point
 
     Notes:
     No check is performed to ensure that the arguments have the right shapes.
@@ -150,17 +150,15 @@ def linterp1D(px, origin, ih, *data):
     spacing shrinks).
     """
 
-    npointsx = len(px)
-
     ndata = len(data)
-
+    npoints = len(px)
     shape = len(data[0])
+    result = np.empty((ndata, npoints), dtype=data[0].dtype)
 
-    result = np.empty((ndata, npointsx), dtype=data[0].dtype)
+    for i in range(npoints):
+        x = px[i]
 
-    for i in range(npointsx):
-
-        auxx = (px[i] - origin)*ih
+        auxx = (x - origin)*ih
 
         ix = np.int64(auxx)
 
@@ -169,24 +167,21 @@ def linterp1D(px, origin, ih, *data):
 
         cpx = auxx - ix
         cx = 1 - cpx
-
-        for n in range(ndata):
-            result[n, i] = data[n][ix]*cx + data[n][ix + 1]*cpx
+        for j in range(ndata):
+            result[j, i] = data[j][ix]*cx + data[j][ix + 1]*cpx
 
     return result
 
 
 @njit(cache=True, fastmath=True)
 def linterp2D(px, py, origin, ih, *data):
-    """Linearly interpolate two-dimensional arrays at a given points.
+    """Linearly interpolate two-dimensional arrays at a given point.
 
     The interpolation is linear on each dimension of the data.
 
     Arguments:
-    px     -- array of floats: interpolation points on the first axis
-              of the data
-    py     -- array of floats: interpolation points on the second axis
-              of the data
+    pxs    -- array of floats, shape=(n,): interpolation points on first axis
+    pys    -- array of floats, shape=(n,): interpolation points on seocnd axis
     origin -- array of floats, shape=(2,): first point of the grid for each
               dimension
     ih     -- array of floats, shape=(2,): inverse of the grid spacing on each
@@ -194,11 +189,8 @@ def linterp2D(px, py, origin, ih, *data):
     data   -- arrays of floats, each of shape=(s0, s1): the data to interpolate
 
     Returns:
-    result -- array of floats, shape=(len(data), len(px), len(py)):
-              the result of the interpolation for each data array and each
-              point. The interpolation is carried out on the grid defined by
-              the cartesian product of the arrays px and py, i.e. at points
-              [(x, y) for x in px for y in py]
+    result -- array of floats, shape=(len(data), n): the result of the
+              interpolation for each data array and each interpolation point
 
     Notes:
     No check is performed to ensure that the arguments have compatible shapes.
@@ -214,59 +206,50 @@ def linterp2D(px, py, origin, ih, *data):
     interpolation point is fixed as the grid spacing shrinks).
     """
 
-    npointsx = len(px)
-    npointsy = len(py)
-
     ndata = len(data)
-
+    npoints = len(px)
     shape = data[0].shape
 
-    result = np.empty((ndata, npointsx, npointsy), dtype=data[0].dtype)
+    result = np.empty((ndata, npoints), dtype=data[0].dtype)
 
-    for i in range(npointsx):
+    for i in range(npoints):
+        x, y = px[i], py[i]
 
-        auxx = (px[i] - origin[0])*ih[0]
+        auxx = (x - origin[0])*ih[0]
+        auxy = (y - origin[1])*ih[1]
+
         ix = np.int64(auxx)
+        iy = np.int64(auxy)
 
-        if (ix == shape[0] - 1):
+        if ix == shape[0] - 1:
             ix -= 1
+        if iy == shape[1] - 1:
+            iy -= 1
 
         cpx = auxx - ix
+        cpy = auxy - iy
         cx = 1 - cpx
+        cy = 1 - cpy
 
-        for j in range(npointsy):
-
-            auxy = (py[j] - origin[1])*ih[1]
-            iy = np.int64(auxy)
-
-            if (iy == shape[1] - 1):
-                iy -= 1
-
-            cpy = auxy - iy
-            cy = 1 - cpy
-
-            for n in range(ndata):
-                result[n, i, j] = (data[n][ix, iy]*cx*cy +
-                                   data[n][ix + 1, iy]*cpx*cy +
-                                   data[n][ix, iy + 1]*cx*cpy +
-                                   data[n][ix + 1, iy + 1]*cpx*cpy)
+        for j in range(ndata):
+            result[j, i] = (data[j][ix, iy]*cx*cy +
+                            data[j][ix + 1, iy]*cpx*cy +
+                            data[j][ix, iy + 1]*cx*cpy +
+                            data[j][ix + 1, iy + 1]*cpx*cpy)
 
     return result
 
 
 @njit(cache=True, fastmath=True)
 def linterp3D(px, py, pz, origin, ih, *data):
-    """Linearly interpolate two-dimensional arrays at a given points.
+    """Linearly interpolate three-dimensional arrays at a given point.
 
     The interpolation is linear on each dimension of the data.
 
     Arguments:
-    px     -- array of floats: interpolation points on the first axis
-              of the data
-    py     -- array of floats: interpolation points on the second axis
-              of the data
-    pz     -- array of floats: interpolation points on the third axis
-              of the data
+    pxs    -- array of floats, shape=(n,): interpolation points on first axis
+    pys    -- array of floats, shape=(n,): interpolation points on seocnd axis
+    pzs    -- array of floats, shape=(n,): interpolation points on third axis
     origin -- array of floats, shape=(3,): first point of the grid for each
               dimension
     ih     -- array of floats, shape=(3,): inverse of the grid spacing on each
@@ -275,11 +258,8 @@ def linterp3D(px, py, pz, origin, ih, *data):
               interpolate
 
     Returns:
-    result -- array of floats, shape=(len(data), len(px), len(py, len(pz))):
-              the result of the interpolation for each data array and each
-              point. The interpolation is carried out on the grid defined by
-              the cartesian product of the arrays px, py and pz, i.e. at points
-              [(x, y, z) for x in px for y in py for z in pz]
+    result -- array of floats, shape=(len(data), n): the result of the
+              interpolation for each data array and each interpolation point
 
     Notes:
     No check is performed to ensure that the arguments have compatible shapes.
@@ -295,60 +275,45 @@ def linterp3D(px, py, pz, origin, ih, *data):
     interpolation point is fixed as the grid spacing shrinks).
     """
 
-    npointsx = len(px)
-    npointsy = len(py)
-    npointsz = len(pz)
-
     ndata = len(data)
-
+    npoints = len(px)
     shape = data[0].shape
+    result = np.empty((ndata, npoints), dtype=data[0].dtype)
 
-    result = np.empty((ndata, npointsx, npointsy, npointsz),
-                      dtype=data[0].dtype)
+    for i in range(npoints):
+        x, y, z = px[i], py[i], pz[i]
 
-    for i in range(npointsx):
+        auxx = (x - origin[0])*ih[0]
+        auxy = (y - origin[1])*ih[1]
+        auxz = (z - origin[2])*ih[2]
 
-        auxx = (px[i] - origin[0])*ih[0]
         ix = np.int64(auxx)
+        iy = np.int64(auxy)
+        iz = np.int64(auxz)
 
-        if (ix == shape[0] - 1):
+        if ix == shape[0] - 1:
             ix -= 1
+        if iy == shape[1] - 1:
+            iy -= 1
+        if iz == shape[2] - 1:
+            iz -= 1
 
         cpx = auxx - ix
+        cpy = auxy - iy
+        cpz = auxz - iz
         cx = 1 - cpx
+        cy = 1 - cpy
+        cz = 1 - cpz
 
-        for j in range(npointsy):
-
-            auxy = (py[j] - origin[1])*ih[1]
-            iy = np.int64(auxy)
-
-            if (iy == shape[1] - 1):
-                iy -= 1
-
-            cpy = auxy - iy
-            cy = 1 - cpy
-
-            for k in range(npointsz):
-
-                auxz = (pz[k] - origin[2])*ih[2]
-                iz = np.int64(auxz)
-
-                if (iz == shape[2] - 1):
-                    iz -= 1
-
-                cpz = auxz - iz
-                cz = 1 - cpz
-
-                for n in range(ndata):
-                    result[n, i, j, k] = \
-                        (data[n][ix, iy, iz]*cx*cy*cz +
-                         data[n][ix + 1, iy, iz]*cpx*cy*cz +
-                         data[n][ix, iy + 1, iz]*cx*cpy*cz +
-                         data[n][ix + 1, iy + 1, iz]*cpx*cpy*cz +
-                         data[n][ix, iy, iz + 1]*cx*cy*cpz +
-                         data[n][ix + 1, iy, iz + 1]*cpx*cy*cpz +
-                         data[n][ix, iy + 1, iz + 1]*cx*cpy*cpz +
-                         data[n][ix + 1, iy + 1, iz + 1]*cpx*cpy*cpz)
+        for j in range(ndata):
+            result[j, i] = (data[j][ix, iy, iz]*cx*cy*cz +
+                            data[j][ix + 1, iy, iz]*cpx*cy*cz +
+                            data[j][ix, iy + 1, iz]*cx*cpy*cz +
+                            data[j][ix + 1, iy + 1, iz]*cpx*cpy*cz +
+                            data[j][ix, iy, iz + 1]*cx*cy*cpz +
+                            data[j][ix + 1, iy, iz + 1]*cpx*cy*cpz +
+                            data[j][ix, iy + 1, iz + 1]*cx*cpy*cpz +
+                            data[j][ix + 1, iy + 1, iz + 1]*cpx*cpy*cpz)
 
     return result
 
@@ -809,3 +774,104 @@ def chinterp3D(px, py, pz, origin, ih, *data):
                          f_xp2_yp2_zp2*c_xp2*c_yp2*c_zp2)
 
     return result
+
+
+if __name__ == "__main__":
+
+    import unittest
+    from scipy.interpolate import interp1d, RegularGridInterpolator
+
+    class test_linterp(unittest.TestCase):
+
+        def test_ND(self):
+
+            dims = 3
+            shape = np.random.randint(3, 42, size=dims)
+            data = np.array([
+                np.random.random(shape),
+                110*np.random.random(shape) - 10,
+                1e-5*np.random.random(shape)])
+            origin = np.random.random(dims)
+            delta = np.random.random(dims)
+            idelta = 1/delta
+            p = delta*(shape - 1)*np.random.random((5, dims)) + origin
+            axes = []
+            for i in range(dims):
+                axes.append([origin[i] + delta[i]*j for j in range(shape[i])])
+            axes = tuple(axes)
+
+            result_linterp = linterpND(p.T, origin, idelta, *data)
+            result_interpn = [RegularGridInterpolator(axes, data[0])(p)]
+            result_interpn.append(RegularGridInterpolator(axes, data[1])(p))
+            result_interpn.append(RegularGridInterpolator(axes, data[2])(p))
+
+            self.assertTrue(np.all(np.isclose(result_linterp, result_interpn)))
+
+        def test_1D(self):
+
+            shape = np.random.randint(3, 42)
+            data = np.array([
+                np.random.random(shape),
+                110*np.random.random(shape) - 10,
+                1e-5*np.random.random(shape)])
+            origin = np.random.random()
+            delta = np.random.random()
+            idelta = 1/delta
+            p = delta*(shape - 1)*np.random.random(5) + origin
+            axes = [origin + delta*j for j in range(shape)]
+            result_linterp = linterp1D(p, origin, idelta, *data)
+            result_interpn = [interp1d(axes, data[0])(p)]
+            result_interpn.append(interp1d(axes, data[1])(p))
+            result_interpn.append(interp1d(axes, data[2])(p))
+
+            self.assertTrue(np.all(np.isclose(result_linterp, result_interpn)))
+
+        def test_2D(self):
+
+            dims = 2
+            shape = np.random.randint(3, 42, size=dims)
+            data = np.array([
+                np.random.random(shape),
+                110*np.random.random(shape) - 10,
+                1e-5*np.random.random(shape)])
+            origin = np.random.random(dims)
+            delta = np.random.random(dims)
+            idelta = 1/delta
+            p = delta*(shape - 1)*np.random.random((5, dims)) + origin
+            axes = []
+            for i in range(dims):
+                axes.append([origin[i] + delta[i]*j for j in range(shape[i])])
+            axes = tuple(axes)
+
+            result_linterp = linterp2D(*p.T, origin, idelta, *data)
+            result_interpn = [RegularGridInterpolator(axes, data[0])(p)]
+            result_interpn.append(RegularGridInterpolator(axes, data[1])(p))
+            result_interpn.append(RegularGridInterpolator(axes, data[2])(p))
+
+            self.assertTrue(np.all(np.isclose(result_linterp, result_interpn)))
+
+        def test_3D(self):
+
+            dims = 3
+            shape = np.random.randint(3, 42, size=dims)
+            data = np.array([
+                np.random.random(shape),
+                110*np.random.random(shape) - 10,
+                1e-5*np.random.random(shape)])
+            origin = np.random.random(dims)
+            delta = np.random.random(dims)
+            idelta = 1/delta
+            p = delta*(shape - 1)*np.random.random((5, dims)) + origin
+            axes = []
+            for i in range(dims):
+                axes.append([origin[i] + delta[i]*j for j in range(shape[i])])
+            axes = tuple(axes)
+
+            result_linterp = linterp3D(*p.T, origin, idelta, *data)
+            result_interpn = [RegularGridInterpolator(axes, data[0])(p)]
+            result_interpn.append(RegularGridInterpolator(axes, data[1])(p))
+            result_interpn.append(RegularGridInterpolator(axes, data[2])(p))
+
+            self.assertTrue(np.all(np.isclose(result_linterp, result_interpn)))
+
+    unittest.main(verbosity=2)
